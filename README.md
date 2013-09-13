@@ -2,6 +2,7 @@ DragonBits
 ==========
 
 &copy; Rolf Michelsen, 2013.
+
 All rights reserved.
 
 
@@ -16,7 +17,7 @@ Introduction
 List of tools
 -------------
 
-*   VDKDump (Dragon 64, DragonDos)
+*   **VDKDump** (Dragon 64, DragonDos)
 
     Read the DragonDos diskette in drive 0 and send it in the VDK virtual diskette format to the
     serial port to a host computer.  The host computer can save this file and use it directly in
