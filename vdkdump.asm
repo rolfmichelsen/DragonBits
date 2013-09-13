@@ -1,0 +1,238 @@
+********************************
+* VDKDUMP                      *
+* DUMP DISK TO SERIAL PORT IN  *
+* THE VDK VIRTUAL DISK FORMAT. *
+*                              *
+* (C) ROLF MICHELSEN, 2010     *
+* HTTP://WWW.ROLFMICHELSEN.COM *
+********************************
+
+       ORG   $0C00
+       PUT   $0C00
+
+@RUN   LBRA  MAIN
+
+BAUD   EQU   6  ;RS232 BAUD RATE
+TRACKS EQU   40 ;DISK TRACKS
+SIDES  EQU   1  ;DISK SIDES
+SECTRS EQU   18 ;DISK SECTORS
+SCTSIZ EQU   256    ;SECTOR SIZE
+TRKSIZ EQU   4608   ;TRACK SIZE
+
+
+
+
+* STANDARD IO SUBROUTINES
+INCH   EQU   $8006
+OUTCH  EQU   $800C
+
+* SERIAL PORT SUBROUTINES
+SERIN  EQU   $802A
+SEROUT EQU   $802D
+SERSET EQU   $8030
+
+* DRAGONDOS SUBROUTINES AND
+* MEMORY LOCATIONS
+DSREAD EQU   $C026 ;INDIRECT
+DSWRIT EQU   $C028 ;INDIRECT
+DRIVE  EQU   $EB   ;DRIVE
+DEFDRV EQU   $060A ;DEFAULT DRV
+
+
+* OUTPUT STRING TO SCREEN.
+* X POINTS TO STRING.
+OUTSTR LDA   ,X+
+       BEQ   L1
+       JSR   OUTCH
+       BRA   OUTSTR
+L1     RTS
+
+* OUTPUT HEX NUMBER TO SCREEN.
+* A CONTAINS NUMBER.
+OUTHEX PSHS  A,X
+       PSHS  A
+       LSRA
+       LSRA
+       LSRA
+       LSRA
+       LEAX  HEXDIG,PC
+       LDA   A,X
+       JSR   OUTCH
+       PULS  A
+       ANDA  #$0F
+       LDA   A,X
+       JSR   OUTCH
+       PULS  A,X
+       RTS
+HEXDIG FCC   /0123456789ABCDEF/
+
+* OUTPUT A BUFFER TO THE SERIAL
+* PORT.  X POINT TO BUFFER, AND
+* Y IS LENGTH OF BUFFER.
+SERBUF PSHS  Y
+L2     LDA   ,X+
+       JSR   SEROUT
+       LEAY  -1,Y
+       BNE   L2
+       PULS  Y
+       RTS
+
+* OUTPUT THE VDK DISK IMAGE
+* HEADER TO THE SERIAL PORT.
+VDKOUT LEAX  VDKHDR,PC
+       LDY   #12
+       BSR   SERBUF
+       RTS
+
+* READ A DISK SECTOR INTO THE
+* BUFFER POINTED TO BY X. Y
+* CONTANS THE SECTOR LSN.
+RDSECT PSHS  D,X
+       PSHS  Y
+       JSR   (DSREAD)
+       BEQ   L5
+
+       PSHS  B
+       LDA   #13
+       JSR   OUTCH
+       LEAX  SERR1,PC
+       LBSR  OUTSTR
+       LDD   1,S
+       LBSR  OUTHEX
+       TFR   B,A
+       LBSR  OUTHEX
+       LEAX  SERR2,PC
+       LBSR  OUTSTR
+       PULS  A
+       LBSR  OUTHEX
+       LDA   #13
+       JSR   OUTCH
+
+L5     PULS  Y
+       PULS  D,X
+       RTS
+
+
+* READ A DISK TRACK INTO THE
+* TRACK BUFFER.  A CONTAINS THE
+* TRACK NUMBER (0 BASED).
+RDTRK  PSHS  D,X,Y,U
+       LDB   #SECTRS
+       MUL
+       TFR   D,Y      ;Y=LSN
+       LEAX  TRKBUF,PC
+       LDA   #SECTRS
+
+L4     BSR   RDSECT
+       LEAY  1,Y
+       LEAX  SCTSIZ,X
+       DECA
+       BNE   L4
+
+       PULS  D,X,Y,U
+       RTS
+
+* THE MAIN PROGRAM STARTS HERE
+MAIN   LEAX  TITLE,PC
+       LBSR  OUTSTR
+
+ ; SET UP THE SERIAL PORT
+       LDB   #BAUD
+       JSR   SERSET
+       BCC   L3
+       LEAX  ERR1,PC
+       LBSR  OUTSTR
+       RTS
+L3     EQU   *
+
+ ; SET UP THE DISK DRIVE
+       LDA   DEFDRV
+       STA   DRIVE
+       LEAX  DRVMSG,PC
+       LBSR  OUTSTR
+       LDA   DRIVE
+       LBSR  OUTHEX
+       LDA   #13
+       JSR   OUTCH
+
+ ; OUTPUT THE VDK HEADER
+       LBSR  VDKOUT
+
+ ; MAIN LOOP.  READ DISK TRACKS
+ ; AND OUTPUT TO THE SERIAL
+ ; PORT.
+       LDA   #0       ; TRACK NO
+
+NXTTRK PSHS  A
+
+       ; OUTPUT TRACK NUMBER
+       LDA   #91
+       JSR   OUTCH
+       LDA   ,S
+       LBSR  OUTHEX
+       LDA   #93
+       JSR   OUTCH
+
+       ; READ TRACK FROM DISK
+       LDA   ,S
+       LBSR  RDTRK
+
+       ; OUTPUT TRACK TO SERIAL
+       ; PORT
+       LEAX  TRKBUF,PC
+       LDY   #TRKSIZ
+       LBSR  SERBUF
+
+       ; CHECK FOR BREAK KEY
+       JSR   INCH
+       CMPA  #3     ;BREAK
+       BNE   L6
+       PULS  A
+       LEAX  INTMSG,PC
+       LBSR  OUTSTR
+       RTS
+
+       ; MOVE TO NEXT TRACK
+L6     PULS  A
+       INCA
+       CMPA  #TRACKS
+       BLO   NXTTRK
+
+       RTS
+
+
+TITLE  FCC   /VDKDUMP 0.0/,13
+       FCC   /DUMP DISK TO /
+       FCC   /SERIAL PORT/,13
+       FCC   /(C) ROLF /
+       FCC   /MICHELSEN, 2010/
+       FCC   13,13
+       FCC   /HOLD /,91
+       FCC   /BREAK/,93,/ TO /
+       FCC   /INTERRUPT/,13,13,0
+
+ERR1   FCC   /SERSET ERROR/,13,0
+
+SERR1  FCC   /READ ERROR/
+       FCC   / LSN=/,0
+SERR2  FCC   / CODE=/,0
+
+INTMSG FCC   13,/PROGRAM /
+       FCC   /INTERRUPTED/,13,0
+
+DRVMSG FCC   /DRIVE /,0
+
+VDKHDR FCC   /dk/
+       FCB   12,0
+       FCB   $10
+       FCB   $10
+       FCB   0
+       FCB   0
+       FCB   TRACKS
+       FCB   SIDES
+       FCB   0
+       FCB   0
+
+* DISK TRACK BUFFER (18 SECTORS)
+TRKBUF RMB   4608
+
